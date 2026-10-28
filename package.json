@@ -1,0 +1,10 @@
+{
+  "name": "tempoui",
+  "version": "0.0.1",
+  "description": "Tempo Deck: a local console for Temporal servers",
+  "type": "module",
+  "private": true,
+  "bin": { "tempoui": "server.mjs" },
+  "scripts": { "start": "node server.mjs" },
+  "engines": { "node": ">=18" }
+}
