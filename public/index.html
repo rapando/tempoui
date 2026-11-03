@@ -33,9 +33,18 @@
       <div class="dist" id="dist" role="img" aria-label="Workflow status distribution"></div>
       <div class="legend" id="legend"></div>
       <div class="filters">
-        <input id="q" type="search" placeholder='Search workflow ID or type, or a visibility query like ExecutionStatus="Running"' aria-label="Search workflows" autocomplete="off" spellcheck="false">
+        <div class="searchrow" id="qRow">
+          <input id="q" type="search" placeholder="Search workflows…" aria-label="Search workflows" autocomplete="off" spellcheck="false">
+          <span class="qmode" id="qMode">Prefix match</span>
+        </div>
         <select id="fType" aria-label="Workflow type"></select>
         <select id="fQueue" aria-label="Task queue"></select>
+      </div>
+      <div class="qerr" id="qErr" hidden></div>
+      <div class="qex" id="qEx">
+        <span>Try</span>
+        <button type="button" data-q='ExecutionStatus="Failed"'>ExecutionStatus="Failed"</button>
+        <button type="button" data-q='StartTime &gt; "2026-11-01T00:00:00Z"'>StartTime &gt; "2026-11-01…"</button>
       </div>
     </div>
     <div class="split">

@@ -79,7 +79,7 @@ const S = {
   execs: [], next: null, loading: false, listErr: null, counts: null, countsExact: true,
   seenTypes: new Set(), seenQueues: new Set(),
   sel: null, detail: null, detailErr: null, detailLoading: false,
-  status: null, q: "", type: "", queue: "", tab: "timeline", hist: "all",
+  status: null, q: "", type: "", queue: "", tab: "summary", hist: "all",
   view: "workflows", live: store.get("live", true),
   schedules: null, schedErr: null, queues: {}, tqExtra: new Set(),
 };
@@ -127,11 +127,11 @@ async function loadList(append) {
     S.next = list.nextPageToken || null;
     S.listErr = null;
     if (!append) { S.counts = counts; }
-    $("#q").classList.remove("bad");
+    $("#qRow").classList.remove("bad"); $("#qErr").hidden = true;
   } catch (e) {
     if (seq !== listSeq) return;
     S.listErr = e.message;
-    if (S.q.trim() && e.status === 400) $("#q").classList.add("bad");
+    if (S.q.trim() && e.status === 400) { $("#qRow").classList.add("bad"); $("#qErr").textContent = e.message; $("#qErr").hidden = false; }
   } finally {
     if (seq === listSeq) { S.loading = false; renderFilters(); renderBand(); renderList(); }
   }
@@ -215,11 +215,11 @@ function buildFromHistory(raw, w) {
     switch (type) {
       case "WorkflowExecutionStarted": sum = (a.workflowType && a.workflowType.name) || ""; input = decodePayloads(a.input); break;
       case "ActivityTaskScheduled": {
-        const s = { kind: "activity", n: (a.activityType && a.activityType.name) || "activity", start: t, st: "run", attempts: 1, waiting: true };
+        const s = { kind: "activity", n: (a.activityType && a.activityType.name) || "activity", start: t, st: "run", attempts: 1, waiting: true, input: decodePayloads(a.input) };
         byId[id] = s; steps.push(s); sum = s.n; break;
       }
       case "ActivityTaskStarted": { const s = byId[a.scheduledEventId]; if (s) { s.attempts = Number(a.attempt || 1); s.waiting = false; if (a.lastFailure) s.err = failMsg(a.lastFailure); sum = s.n + (s.attempts > 1 ? " · attempt " + s.attempts : ""); } break; }
-      case "ActivityTaskCompleted": { const s = byId[a.scheduledEventId]; if (s) { s.st = "ok"; s.dur = t - s.start; sum = s.n; } break; }
+      case "ActivityTaskCompleted": { const s = byId[a.scheduledEventId]; if (s) { s.st = "ok"; s.dur = t - s.start; s.result = decodePayloads(a.result); sum = s.n; } break; }
       case "ActivityTaskFailed": { const s = byId[a.scheduledEventId]; if (s) { s.st = "fail"; s.dur = t - s.start; s.err = failMsg(a.failure); sum = s.n + " · " + s.err; } break; }
       case "ActivityTaskTimedOut": { const s = byId[a.scheduledEventId]; if (s) { s.st = "to"; s.dur = t - s.start; s.err = failMsg(a.failure); sum = s.n + " · " + (s.err || "timed out"); } break; }
       case "ActivityTaskCanceled": { const s = byId[a.scheduledEventId]; if (s) { s.st = "cancel"; s.dur = t - s.start; sum = s.n; } break; }
@@ -234,7 +234,7 @@ function buildFromHistory(raw, w) {
       case "WorkflowExecutionSignaled": steps.push({ kind: "signal", n: a.signalName, start: t, dur: 0, st: "ok" }); sum = a.signalName; break;
       case "WorkflowExecutionUpdateAccepted": { const n = a.acceptedRequest && a.acceptedRequest.input && a.acceptedRequest.input.name; steps.push({ kind: "signal", n: "update " + (n || ""), start: t, dur: 0, st: "ok" }); sum = n || ""; break; }
       case "StartChildWorkflowExecutionInitiated": {
-        const s = { kind: "child", n: (a.workflowType && a.workflowType.name) || "child", start: t, st: "run", attempts: 1, wid: a.workflowId };
+        const s = { kind: "child", n: (a.workflowType && a.workflowType.name) || "child", start: t, st: "run", attempts: 1, wid: a.workflowId, input: decodePayloads(a.input) };
         byId[id] = s; steps.push(s); sum = s.n + " · " + (a.workflowId || ""); break;
       }
       case "ChildWorkflowExecutionCompleted": case "ChildWorkflowExecutionFailed": case "ChildWorkflowExecutionTimedOut":
@@ -242,7 +242,9 @@ function buildFromHistory(raw, w) {
         const s = byId[a.initiatedEventId]; if (s) {
           s.dur = t - s.start;
           s.st = /Completed/.test(type) ? "ok" : /TimedOut/.test(type) ? "to" : /Canceled|Terminated/.test(type) ? "cancel" : "fail";
-          if (a.failure) s.err = failMsg(a.failure); sum = s.n + (s.err ? " · " + s.err : "");
+          if (a.failure) s.err = failMsg(a.failure);
+          if (type === "ChildWorkflowExecutionCompleted") s.result = decodePayloads(a.result);
+          sum = s.n + (s.err ? " · " + s.err : "");
         } break;
       }
       case "ChildWorkflowExecutionStarted": { const s = byId[a.initiatedEventId]; if (s) sum = s.n; break; }
@@ -268,6 +270,14 @@ function fillSelect(el, label, vals, cur) {
 function renderFilters() {
   fillSelect($("#fType"), "All workflow types", [...S.seenTypes].sort(), S.type);
   fillSelect($("#fQueue"), "All task queues", [...S.seenQueues].sort(), S.queue);
+  updateSearchUI();
+}
+// Mirrors isRawQuery so the box tells you which mode it's in before the request round-trips.
+function updateSearchUI() {
+  const trimmed = S.q.trim(), query = !!trimmed && isRawQuery(trimmed);
+  $("#qMode").textContent = query ? "Visibility query" : "Prefix match";
+  $("#qMode").classList.toggle("query", query);
+  $("#qEx").hidden = !!trimmed;
 }
 function renderBand() {
   let cnt = S.counts, approx = false;
@@ -297,11 +307,14 @@ function renderList() {
   if (!S.conn || !S.conn.ok) { el.innerHTML = notConnectedHTML(); return; }
   if (S.listErr) { el.innerHTML = '<div class="none"><b>Couldn\'t list workflows</b><span class="err">' + esc(S.listErr) + "</span>" + (S.q.trim() ? "<span>Check the search. Plain text matches the start of a workflow ID or type; anything with = or an operator is sent as a visibility query.</span>" : "") + "</div>"; return; }
   if (!S.execs.length) { el.innerHTML = S.loading ? '<div class="none">Loading…</div>' : '<div class="none"><b>No workflow executions' + (buildQuery(true) ? " match these filters" : " in " + esc(S.ns)) + "</b>" + (buildQuery(true) ? "" : "<span>Start a workflow and it shows up here within a few seconds.</span>") + "</div>"; return; }
+  const maxRunDur = Math.max(0, ...S.execs.filter(w => w.status === "Running").map(w => now - w.startMs));
   el.innerHTML = S.execs.map(w => {
-    const k = keyOf(w);
-    return '<button class="strip" role="option" aria-selected="' + (k === S.sel) + '" data-k="' + esc(k) + '">' +
-      '<div class="main"><div class="t"><strong>' + esc(w.type) + "</strong>" + pill(w.status) + '</div><div class="sub"><span>' + esc(w.id) + "</span><span>" + esc(w.queue) + "</span></div></div>" +
-      '<div class="meta"><span title="' + esc(new Date(w.startMs).toLocaleString()) + '">' + rel(w.startMs, now) + "</span><span>" + durOf(w) + (w.status === "Running" ? " so far" : "") + "</span><span>" + (w.historyLength ? w.historyLength + " events" : "") + "</span></div></button>";
+    const k = keyOf(w), running = w.status === "Running", dur = (w.closeMs || now) - w.startMs;
+    const acts = running ? '<div class="acts"><button data-act="cancel">Cancel</button><button data-act="terminate" class="danger">Terminate</button></div>' : "";
+    const bar = running && maxRunDur ? '<div class="durtrack" title="longest running visible: ' + fmtDur(maxRunDur) + '"><span style="width:' + Math.max(4, Math.round(dur / maxRunDur * 100)) + '%"></span></div>' : "";
+    return '<div class="strip' + (running ? " running" : "") + '" role="option" tabindex="0" aria-selected="' + (k === S.sel) + '" data-k="' + esc(k) + '" style="--c:var(' + VAR[w.status] + ')">' +
+      '<div class="main"><div class="t"><strong>' + esc(w.type) + '</strong><span class="stlabel">' + ST[w.status][1] + '</span></div><div class="sub"><span>' + esc(w.id) + "</span><span>" + esc(w.queue) + "</span></div></div>" +
+      '<div class="meta">' + acts + '<span title="' + esc(new Date(w.startMs).toLocaleString()) + '">' + rel(w.startMs, now) + "</span><span>" + durOf(w) + (running ? " so far" : "") + "</span>" + bar + (w.historyLength ? "<span>" + w.historyLength + " events</span>" : "") + "</div></div>";
   }).join("") + (S.next ? '<div class="more"><button class="btn" data-act="more"' + (S.loading ? " disabled" : "") + ">Load more</button></div>" : "");
 }
 
@@ -344,6 +357,29 @@ function tlHTML(d) {
     '<div class="axis">' + ticks + '</div><div style="position:relative">' + gl + rows + (run ? '<div class="now" style="left:' + F(el) + '" title="now"></div>' : "") + "</div>" +
     (d.steps.length > MAX_LANES ? '<div class="tlnote">Showing the first ' + MAX_LANES + " of " + d.steps.length + " steps.</div>" : "") +
     '<div class="key"><span style="--c:var(--s-ok)">Completed</span><span style="--c:var(--s-fail)">Failed</span><span style="--c:var(--s-to)">Timed out</span><span style="--c:var(--s-run)">In flight</span><span style="--c:var(--s-cancel)">Canceled</span><span style="--c:var(--ink-3)">Timer</span><span style="--c:var(--s-can)">Signal / update</span></div></div>';
+}
+const SUM_LABEL = { ok: "Completed", fail: "Failed", to: "Timed out", cancel: "Canceled" };
+const sumStatus = s => s.waiting ? "Scheduled" : s.st === "run" ? "Running" : (SUM_LABEL[s.st] || s.st);
+const hasVal = v => v !== undefined && !(Array.isArray(v) && v.length === 0);
+function sumHTML(d) {
+  const w = d.w, steps = d.steps.filter(s => s.kind === "activity" || s.kind === "timer" || s.kind === "child");
+  if (!steps.length) return '<div class="empty">' + (w.status === "Running" ? "This execution has not scheduled any activities or timers yet." : "This execution ran without activities or timers — see Event history for everything that happened.") + "</div>";
+  const now = Date.now(), run = w.status === "Running", el = run ? Math.max(0, (now - d.t0) / 1000) : null;
+  const row = (k, v) => v == null || v === "" ? "" : "<dt>" + k + "</dt><dd>" + v + "</dd>";
+  const card = s => {
+    const dur = s.st === "run" ? Math.max(0, (el || 0) - s.start) : (s.dur || 0);
+    const c = stepColor(s), kindLabel = s.kind === "timer" ? "Sleep" : s.kind === "child" ? "Child workflow" : "Activity";
+    let h = '<section><h3>' + kindLabel + " · " + esc(s.n) + '<span class="pill" style="--c:' + c + '">' + esc(sumStatus(s)) + '</span></h3><dl class="kv">' +
+      (s.kind === "timer"
+        ? row("Duration", esc(fmtDur(s.plan * 1000)) + (s.st === "run" ? " planned · " + esc(fmtDur(dur * 1000)) + " elapsed so far" : ""))
+        : row(s.waiting ? "Waiting" : "Duration", esc(fmtDur(dur * 1000))) + row("Attempt", s.kind === "activity" && s.attempts > 1 ? s.attempts : null) + (s.kind === "child" ? row("Workflow ID", esc(s.wid)) : "")) +
+      "</dl>";
+    if (s.kind !== "timer" && hasVal(s.input)) h += "<h4>Input</h4><pre>" + json(s.input) + "</pre>";
+    if (s.kind !== "timer" && hasVal(s.result)) h += "<h4>Output</h4><pre>" + json(s.result) + "</pre>";
+    if (s.err) h += '<div class="fail"><b>' + esc(sumStatus(s)) + "</b> " + esc(s.err) + "</div>";
+    return h + "</section>";
+  };
+  return '<div class="pay">' + steps.map(card).join("") + "</div>";
 }
 const HF = [["all", "All"], ["act", "Activities"], ["timer", "Timers"], ["sig", "Signals"], ["child", "Children"], ["wft", "Workflow tasks"], ["wf", "Workflow"]];
 function histHTML(d) {
@@ -403,17 +439,18 @@ function renderPane() {
   if (S.detailErr) { p.innerHTML = '<div class="empty"><span class="err">' + esc(S.detailErr) + "</span></div>"; return; }
   if (!d) { p.innerHTML = '<div class="empty">Loading…</div>'; return; }
   const top = p.scrollTop, open = $$(".evj", p).map(x => x.previousElementSibling && x.previousElementSibling.dataset.i);
-  p.innerHTML = S.tab === "timeline" ? tlHTML(d) : S.tab === "history" ? histHTML(d) : S.tab === "payloads" ? payHTML(d) : pendHTML(d);
+  p.innerHTML = S.tab === "summary" ? sumHTML(d) : S.tab === "timeline" ? tlHTML(d) : S.tab === "history" ? histHTML(d) : S.tab === "payloads" ? payHTML(d) : pendHTML(d);
   if (S.tab === "history") open.forEach(i => { const ev = $('.ev[data-i="' + i + '"]', p); if (ev) ev.insertAdjacentHTML("afterend", '<div class="evj"><pre>' + json(d.events[+i].data) + "</pre></div>"); });
   p.scrollTop = top;
 }
 function dockHeadHTML(w) {
   const d = S.detail && keyOf(S.detail.w) === keyOf(w) ? S.detail : null, run = w.status === "Running", pc = pendCount(d);
+  const sc = d ? d.steps.filter(s => s.kind === "activity" || s.kind === "timer" || s.kind === "child").length : 0;
   return '<button class="btn back" data-act="back">← Executions</button><h2>' + esc(w.type) + "</h2><div>" + pill(w.status) + "</div>" +
     '<div class="ids"><span>' + esc(w.id) + "</span><span>run " + esc(w.runId) + "</span><span>" + esc(w.queue) + "</span></div>" +
     '<div class="acts"><button class="btn" data-act="copy" data-v="' + esc(w.id) + '">Copy ID</button><button class="btn" data-act="copy" data-v="' + esc(w.runId) + '">Copy run ID</button>' +
     '<button class="btn" data-act="cancel"' + (run ? "" : " disabled") + '>Request cancel</button><button class="btn danger" data-act="terminate"' + (run ? "" : " disabled") + ">Terminate</button></div>" +
-    "\u0000" + '<button role="tab" data-tab="timeline">Timeline</button><button role="tab" data-tab="history">History' + (d ? " (" + d.events.length + ")" : "") + '</button><button role="tab" data-tab="payloads">Payloads</button><button role="tab" data-tab="pending">Pending' + (pc ? " (" + pc + ")" : "") + "</button>";
+    "\u0000" + '<button role="tab" data-tab="summary">Summary' + (sc ? " (" + sc + ")" : "") + '</button><button role="tab" data-tab="timeline">Timeline</button><button role="tab" data-tab="history">History' + (d ? " (" + d.events.length + ")" : "") + '</button><button role="tab" data-tab="payloads">Payloads</button><button role="tab" data-tab="pending">Pending' + (pc ? " (" + pc + ")" : "") + "</button>";
 }
 function renderDockHead() {
   const w = sel(), h = $("#dock .dock-h"), t = $("#dock .tabs"); if (!w || !h || !t) return;
@@ -463,7 +500,7 @@ function renderSchedules() {
   }).join("");
 }
 async function schedOp(id, op) {
-  if (op === "runs") { S.q = 'TemporalScheduledById="' + qv(id) + '"'; $("#q").value = S.q; S.status = null; setView("workflows"); loadList(); return; }
+  if (op === "runs") { S.q = 'TemporalScheduledById="' + qv(id) + '"'; $("#q").value = S.q; updateSearchUI(); S.status = null; setView("workflows"); loadList(); return; }
   const patch = op === "pause" ? { pause: "Paused from Tempo Deck" } : op === "unpause" ? { unpause: "Unpaused from Tempo Deck" } : { triggerImmediately: {} };
   try {
     await api(nsPath("/schedules/" + encodeURIComponent(id) + "/patch"), { method: "POST", body: { namespace: S.ns, scheduleId: id, patch, identity: "tempo-deck", requestId: uuid() } });
@@ -619,7 +656,7 @@ setInterval(async () => {
 setInterval(() => {
   if (document.hidden || S.view !== "workflows") return;
   if (S.execs.some(w => w.status === "Running")) renderList();
-  const w = sel(); if (w && w.status === "Running" && S.tab === "timeline" && S.detail) renderPane();
+  const w = sel(); if (w && w.status === "Running" && (S.tab === "summary" || S.tab === "timeline") && S.detail) renderPane();
 }, 1000);
 
 /* ---------- confirm (cancel / terminate) ---------- */
@@ -649,14 +686,25 @@ async function runAct() {
 $("#nav").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; setView(b.dataset.view); try { history.replaceState(null, "", "#" + b.dataset.view); } catch {} });
 addEventListener("hashchange", () => setView(location.hash.slice(1)));
 let qTimer;
-$("#q").addEventListener("input", e => { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(() => loadList(), 350); });
+$("#q").addEventListener("input", e => { S.q = e.target.value; updateSearchUI(); clearTimeout(qTimer); qTimer = setTimeout(() => loadList(), 350); });
 $("#fType").addEventListener("change", e => { S.type = e.target.value; loadList(); });
 $("#fQueue").addEventListener("change", e => { S.queue = e.target.value; loadList(); });
+$("#qEx").addEventListener("click", e => {
+  const b = e.target.closest("[data-q]"); if (!b) return;
+  S.q = b.dataset.q; $("#q").value = S.q; updateSearchUI();
+  clearTimeout(qTimer); loadList(); $("#q").focus();
+});
 function statusClick(e) { const b = e.target.closest("[data-st]"); if (!b) return; const v = b.dataset.st; S.status = (!v || S.status === v) ? null : v; renderBand(); loadList(); }
 $("#dist").addEventListener("click", statusClick); $("#legend").addEventListener("click", statusClick);
 document.addEventListener("click", e => { if (e.target.closest('[data-act="openconn"]')) openConn(); });
 $("#strips").addEventListener("click", e => {
   if (e.target.closest('[data-act="more"]')) { loadList(true); return; }
+  const rowAct = e.target.closest(".strip .acts [data-act]");
+  if (rowAct) {
+    const strip = rowAct.closest(".strip"), w = S.execs.find(x => keyOf(x) === strip.dataset.k);
+    if (w) confirmAct(rowAct.dataset.act, w);
+    return;
+  }
   const b = e.target.closest(".strip"); if (!b) return;
   if (S.sel === b.dataset.k) return;
   S.sel = b.dataset.k; S.detail = null; S.hist = "all";
