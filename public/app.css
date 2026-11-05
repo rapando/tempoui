@@ -17,15 +17,13 @@
   --r:3px; --stub:8px;
   color-scheme:light;
 }
-@media (prefers-color-scheme:dark){
-  :root{
+:root[data-theme="dark"]{
     --bay:#0C1116; --strip:#151B22; --surface:#1B232C; --raised:var(--strip);
     --rail:#05080B; --rail-ink:#E8EDF2; --rail-ink-2:#8E9BA8; --rail-line:#1E2932;
     --ink:#E4E9EE; --ink-2:#A5B0BB; --ink-3:#6F7C89; --line:#2B353F; --line-2:#222B34;
     --accent:#3FC3C9; --accent-ink:#06191A; --hi:#2E2A12; --hi-line:#6E6324;
     --s-run:#5E9BFF; --s-ok:#3FC27A; --s-fail:#F26A6A; --s-to:#E6A23C; --s-cancel:#8B98A5; --s-term:#B4C0CC; --s-can:#AB90F2;
     color-scheme:dark;
-  }
 }
 
 *{box-sizing:border-box}
@@ -74,6 +72,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .conn{display:inline-flex;align-items:center;gap:8px;background:transparent;border:1px solid var(--rail-line);border-radius:var(--r);padding:5px 10px;cursor:pointer;font:500 12px var(--font-mono);color:var(--rail-ink-2);max-width:340px}
 .conn:hover{border-color:var(--rail-ink-2);color:var(--rail-ink)}
 .conn span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* light / dark switch */
+.theme{display:inline-flex;border:1px solid var(--rail-line);border-radius:var(--r);overflow:hidden}
+.theme button{background:transparent;border:0;padding:5px 10px;cursor:pointer;color:var(--rail-ink-2);font:600 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase}
+.theme button+button{border-left:1px solid var(--rail-line)}
+.theme button:hover{color:var(--rail-ink)}
+.theme button[aria-pressed="true"]{background:var(--rail-ink);color:var(--rail)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:none}
 .dot.ok{background:var(--s-ok)} .dot.bad{background:var(--s-fail)} .dot.wait{background:var(--s-to)}
 

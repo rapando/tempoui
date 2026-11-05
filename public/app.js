@@ -773,3 +773,14 @@ $("#btnLive").setAttribute("aria-pressed", S.live);
 setView(location.hash.slice(1));
 renderAll();
 refreshConn();
+
+/* ---------- theme ---------- */
+(function () {
+  const root = document.documentElement;
+  const apply = t => {
+    if (t === "dark") root.setAttribute("data-theme", "dark"); else root.removeAttribute("data-theme");
+    $$("[data-theme-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeSet === (t === "dark" ? "dark" : "light"))));
+  };
+  apply(store.get("theme", "light"));
+  $$("[data-theme-set]").forEach(b => b.addEventListener("click", () => { store.set("theme", b.dataset.themeSet); apply(b.dataset.themeSet); }));
+})();
