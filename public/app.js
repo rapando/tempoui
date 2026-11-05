@@ -10,8 +10,8 @@ const store = {
 
 function fmtDur(ms) {
   if (ms < 1000) return Math.max(0, Math.round(ms)) + " ms";
-  const s = ms / 1000; if (s < 60) return s.toFixed(s < 10 ? 1 : 0) + "s";
-  const m = Math.floor(s / 60); if (m < 60) return m + "m " + pad(Math.round(s % 60)) + "s";
+  const s = ms / 1000; if (s < 10) return s.toFixed(1) + "s"; if (s < 60) return Math.floor(s) + "s";
+  const m = Math.floor(s / 60); if (m < 60) return m + "m " + pad(Math.floor(s % 60)) + "s";
   const h = Math.floor(m / 60); if (h < 48) return h + "h " + pad(m % 60) + "m";
   return Math.floor(h / 24) + "d " + (h % 24) + "h";
 }
